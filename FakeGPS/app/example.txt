@@ -1,0 +1,83 @@
+from aiogram import Router, F
+from aiogram.types import Message
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
+from aiogram.filters import Command
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+
+from app.states import AI
+
+import time
+import asyncio
+
+# Настройки для Chrome
+chrome_options = Options()
+chrome_options.add_argument("--use-fake-ui-for-media-stream")
+chrome_options.add_argument("--use-fake-device-for-media-stream")
+
+# Стартуем драйвер
+driver = webdriver.Chrome(options=chrome_options)
+
+# Список геолокаций для смены, добавьте начальные координаты по умолчанию
+storage = MemoryStorage()
+router1 = Router()
+
+@router1.message(F.text.startswith('/set_location'))
+async def change_gps(message: Message, state: FSMContext):
+    user_input = message.text[len('/set_location '):].strip()
+    coordinates = user_input.split()
+# Список геолокаций для смены
+    try:
+        if len(coordinates) != 2:
+            await message.answer("Please provide both latitude and longitude.")
+            return
+        
+        user_lat = float(coordinates[0])
+        user_lon = float(coordinates[1])
+        await state.update_data(lat=user_lat, lon=user_lon)
+        # Here you can save the coordinates or perform any action you need
+        await message.answer(f"Location set to:\nLatitude: {user_lat}\nLongitude: {user_lon}")
+    
+    except ValueError:
+        await message.answer("Invalid input. Please provide valid numeric values for latitude and longitude.")
+
+@router1.message(Command('next'))
+# Функция для изменения геолокации
+async def next_command(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lat = data.get('lat')
+    lon = data.get('lon')
+
+    if lat is None or lon is None:
+        await message.answer("You need to set the location first using /set_location.")
+        return
+
+    # Функция для изменения геолокации
+    await change_geolocation(lat, lon)
+
+async def change_geolocation(lat: float, lon: float):
+    driver.execute_cdp_cmd('Emulation.setGeolocationOverride', {
+        'latitude': lat,
+        'longitude': lon,
+        'accuracy': 100
+    })
+
+locations = [(lat, lon)]
+
+# Открытие страницы
+driver.get("https://yandex.ru/maps")
+
+try:
+    while True:
+        for lat, lon in locations:
+            change_geolocation(lat, lon)
+            print(f"Изменение геолокации на: {lat}, {lon}")
+            time.sleep(0.5)  # Ждать 0.5 секунд
+except KeyboardInterrupt:
+    print("Скрипт остановлен.")
+
+# Закрытие браузера
+driver.quit()
